@@ -2369,9 +2369,11 @@ void displayEntry(struct singleEntry * entry, const char * prefix, int index) {
     } else {
 	char * title;
 	line = getLineByType(LT_MENUENTRY, entry->lines);
-	title = grub2ExtractTitle(line);
-	if (title)
-	    printf("title=%s\n", title);
+	if (line) {
+	    title = grub2ExtractTitle(line);
+	    if (title)
+		printf("title=%s\n", title);
+	}
     }
 
     for (j = 0, line = entry->lines; line; line = line->next) {
