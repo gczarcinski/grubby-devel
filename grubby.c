@@ -152,6 +152,7 @@ typedef const int (*writeLineFunc)(struct configFileInfo *,
 				struct singleLine *line);
 typedef char *(*getEnvFunc)(struct configFileInfo *, char *name);
 typedef int (*setEnvFunc)(struct configFileInfo *, char *name, char *value);
+typedef int (*validateEntryFunc)(struct singleEntry *entry);
 
 struct configFileInfo {
     char * defaultConfig;
@@ -159,6 +160,7 @@ struct configFileInfo {
     writeLineFunc writeLine;
     getEnvFunc getEnv;
     setEnvFunc setEnv;
+    validateEntryFunc validateEntry;
     struct keywordTypes * keywords;
     int caseInsensitive;
     int defaultIsIndex;
@@ -482,10 +484,29 @@ char *grub2ExtractTitle(struct singleLine * line) {
     return result;
 }
 
+static const char * endOfValidGrub2Entries = "### END /etc/grub.d/10_linux ###";
+
+int grub2ValidateEntry(struct singleEntry *entry) {
+    struct singleLine * line = entry->lines;
+    while(line != NULL) {
+	if ((line->numElements == 0) &&
+	    (line->type == LT_WHITESPACE) &&
+	    (line->indent != NULL) &&
+	    (strcmp(line->indent, endOfValidGrub2Entries) == 0)) {
+		dbgPrintf("findEntryByIndex() end valid entries: %s\n",
+		    endOfValidGrub2Entries);
+		return 0;
+	}
+	line = line->next;
+    }
+    return -1;
+}
+
 struct configFileInfo grub2ConfigType = {
     .findConfig = grub2FindConfig,
     .getEnv = grub2GetEnv,
     .setEnv = grub2SetEnv,
+    .validateEntry = grub2ValidateEntry,
     .keywords = grub2Keywords,
     .defaultIsIndex = 1,
     .defaultSupportSaved = 1,
@@ -665,6 +686,7 @@ struct grubConfig {
 blkid_cache blkid;
 
 struct singleEntry * findEntryByIndex(struct grubConfig * cfg, int index);
+struct singleEntry * findValidEntryByIndex(struct grubConfig * cfg, int index);
 struct singleEntry * findEntryByPath(struct grubConfig * cfg, 
 				     const char * path, const char * prefix,
 				     int * index);
@@ -2109,6 +2131,30 @@ struct singleEntry * findEntryByIndex(struct grubConfig * cfg, int index) {
     return entry;
 }
 
+/* ** code added to detect end of valid entries ** */
+/* A separate function because other code may depend on currect functionality. */
+/* Right now, findTemplate() is the ony use but there may be other places */
+/* this should be used instead of findEntryByIndex. */
+struct singleEntry * findValidEntryByIndex(struct grubConfig * cfg, int index) {
+    struct singleEntry * entry;
+
+    entry = cfg->entries;
+    while (index && entry) {
+	entry = entry->next;
+	index--;
+    }
+
+    if (entry == NULL)
+	return NULL;
+
+    if (cfg->cfi->validateEntry) {
+	if (!cfg->cfi->validateEntry(entry))
+	    return NULL;
+    }
+
+    return entry;
+}
+
 /* Find a good template to use for the new kernel. An entry is
  * good if the kernel and mkinitrd exist (even if the entry
  * is going to be removed). Try and use the default entry, but
@@ -2126,7 +2172,7 @@ struct singleEntry * findTemplate(struct grubConfig * cfg, const char * prefix,
 		int index = 0;
 		if (isnumber(defTitle)) {
 		    index = atoi(defTitle);
-		    entry = findEntryByIndex(cfg, index);
+		    entry = findValidEntryByIndex(cfg, index);
 		} else {
 		    entry = findEntryByTitle(cfg, defTitle, &index);
 		}
@@ -2134,12 +2180,13 @@ struct singleEntry * findTemplate(struct grubConfig * cfg, const char * prefix,
 		    cfg->defaultImage = index;
 		    if (indexPtr)
 			*indexPtr = index;
+	            dbgPrintf("suitable template found based on saved_entry");
 		    return entry;
 		}
 	    }
 	}
     } else if (cfg->defaultImage > -1) {
-	entry = findEntryByIndex(cfg, cfg->defaultImage);
+	entry = findValidEntryByIndex(cfg, cfg->defaultImage);
 	if (entry && suitableImage(entry, prefix, skipRemoved, flags)) {
 	    if (indexPtr) *indexPtr = cfg->defaultImage;
 	    return entry;
@@ -2147,7 +2194,7 @@ struct singleEntry * findTemplate(struct grubConfig * cfg, const char * prefix,
     }
 
     index = 0;
-    while ((entry = findEntryByIndex(cfg, index))) {
+    while ((entry = findValidEntryByIndex(cfg, index))) {
 	if (suitableImage(entry, prefix, skipRemoved, flags)) {
             int j;
             for (j = 0; j < index; j++) {
