@@ -619,6 +619,40 @@ if [ "$testgrub2" == "y" ]; then
         testing="GRUB2 add initrd with linux16"
         grub2Test grub2.11 add/g2-1.11 --update-kernel=/boot/new-kernel.img \
             --initrd=/boot/new-initrd --boot-filesystem=/boot/
+
+        testing="GRUB2 add kernel with boot on btrfs subvol"
+        grub2Test grub2.15 add/g2-1.15 --add-kernel=/boot/new-kernel.img \
+            --title='title' \
+            --boot-filesystem=/boot/ \
+            --copy-default
+
+        testing="GRUB2 add initrd with boot on btrfs subvol"
+        grub2Test grub2.16 add/g2-1.16 --update-kernel=/boot/new-kernel.img \
+            --initrd=/boot/new-initrd --boot-filesystem=/boot/
+
+        testing="GRUB2 add kernel with rootfs on btrfs subvol and boot directory"
+        grub2Test grub2.17 add/g2-1.17 --add-kernel=/boot/new-kernel.img \
+            --title='title' \
+            --boot-filesystem= \
+            --copy-default
+
+        testing="GRUB2 add initrd with rootfs on btrfs subvol and boot directory"
+        grub2Test grub2.18 add/g2-1.18 --update-kernel=/boot/new-kernel.img \
+            --initrd=/boot/new-initrd --boot-filesystem=
+
+        testing="GRUB2 add kernel and initrd with boot on btrfs subvol"
+        grub2Test grub2.19 add/g2-1.19 --add-kernel=/boot/new-kernel.img \
+            --title='title' \
+            --initrd=/boot/new-initrd \
+            --boot-filesystem=/boot/ \
+            --copy-default
+
+        testing="GRUB2 add kernel and initrd with rootfs on btrfs subvol and boot directory"
+        grub2Test grub2.20 add/g2-1.20 --add-kernel=/boot/new-kernel.img \
+            --title='title' \
+            --initrd=/boot/new-initrd \
+            --boot-filesystem= \
+            --copy-default
     fi
 fi
 
