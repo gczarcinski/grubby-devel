@@ -265,7 +265,7 @@ install() {
 
 	$grubby --extlinux -c $extlinuxConfig \
 	    --add-kernel=$kernelImage \
-	    $INITRD --copy-default $makedefault --title "$title" \
+	    $DEVTREE $INITRD --copy-default $makedefault --title "$title" \
 	    ${mbkernel:+--add-multiboot="$mbkernel"} ${mbargs:+--mbargs="$mbargs"} \
 	    --args="root=$rootdevice $kernargs" --remove-kernel="TITLE=$title"
     else
@@ -411,6 +411,12 @@ update() {
 	fi
     fi
 
+    DEVTREE=""
+    if [ "x$devtreefile" != "x" -a -f "$devtreefile" ]; then
+        [ -n "$verbose" ] && echo "found $devtreefile and using it with grubby"
+        DEVTREE="--devtree $devtreefile"
+    fi
+
     if [ -n "$cfgGrub" ]; then
 	[ -n "$verbose" ] && echo "updating $version from $grubConfig"
 	$grubby --grub -c $grubConfig \
@@ -499,7 +505,7 @@ update() {
 	[ -n "$verbose" ] && echo "updating $version from $extlinuxConfig"
 	$grubby --extlinux -c $extlinuxConfig \
 	    --update-kernel=$kernelImage \
-	    $INITRD \
+	    $DEVTREE $INITRD \
 	    ${kernargs:+--args="$kernargs"} \
 	    ${removeargs:+--remove-args="$removeargs"}
     else
@@ -723,6 +729,16 @@ if [ -z "$initrdfile" ]; then
 
 fi
 [ -n "$verbose" ] && echo "initrdfile is $initrdfile"
+
+if [[ ${ARCH} =~ armv[5|7].*l ]]; then
+    if [ -d "$bootPrefix/dtb-$version/" ]; then
+	devtreedir="$bootPrefix/dtb-$version/"
+	if [ -n "$dtbfile" -a -f "$devtreedir/$dtbfile" ]; then
+	    devtreefile="$devtreedir/$dtbfile"
+	fi
+    fi
+fi
+[ -n "$verbose" ] && echo "devtreedir is $devtreedir"
 
 # add dracut i18n, keyboard and plymouth kernel args if requested
 if [ -n "$dracut" -o -n "$adddracutargs" ]; then
