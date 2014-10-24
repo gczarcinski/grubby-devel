@@ -36,6 +36,12 @@ else
     grubby=/sbin/grubby
 fi
 
+if [ "x$GRUBBY_ENABLE_DEBUG" = "xyes" ]; then
+    enableDebug="--enable-debug"
+else
+    enableDebug=""
+fi
+
 [ -f /etc/sysconfig/kernel ] && . /etc/sysconfig/kernel
 [ -f /etc/sysconfig/uboot ] && . /etc/sysconfig/uboot
 
@@ -212,7 +218,7 @@ install() {
     if [ -n "$cfgGrub" ]; then
 	[ -n "$verbose" ] && echo "adding $version to $grubConfig"
 
-	$grubby --grub -c $grubConfig \
+	$grubby $enableDebug --grub -c $grubConfig \
 	    --add-kernel=$kernelImage \
 	    $INITRD --copy-default $makedefault --title "$title" \
 	    ${mbkernel:+--add-multiboot="$mbkernel"} ${mbargs:+--mbargs="$mbargs"} \
@@ -223,7 +229,7 @@ install() {
     if [ -n "$cfgGrub2" ]; then
 	[ -n "$verbose" ] && echo "adding $version to $grub2Config"
 
-	$grubby --grub2 -c $grub2Config \
+	$grubby $enableDebug --grub2 -c $grub2Config \
 	    --add-kernel=$kernelImage \
 	    $INITRD --copy-default $makedefault --title "$title" \
 	    ${mbkernel:+--add-multiboot="$mbkernel"} \
@@ -235,7 +241,7 @@ install() {
     if [ -n "$cfgGrub2Efi" ]; then
 	[ -n "$verbose" ] && echo "adding $version to $grub2EfiConfig"
 
-	$grubby --grub2 -c $grub2EfiConfig --efi \
+	$grubby $enableDebug --grub2 -c $grub2EfiConfig --efi \
 	    --add-kernel=$kernelImage $DEVTREE \
 	    $INITRD --copy-default $makedefault --title "$title" \
 	    ${mbkernel:+--add-multiboot="$mbkernel"} \
@@ -248,7 +254,7 @@ install() {
     if [ -n "$cfgLilo" ]; then
 	[ -n "$verbose" ] && echo "adding $version to $liloConfig"
 
-	$grubby --add-kernel=$kernelImage $INITRD \
+	$grubby $enableDebug --add-kernel=$kernelImage $INITRD \
 		--copy-default $makedefault --title "$title" \
 		${mbkernel:+--add-multiboot="$mbkernel"} ${mbargs:+--mbargs="$mbargs"} \
 		--args="root=$rootdevice $kernargs" --remove-kernel="TITLE=$version" \
@@ -269,7 +275,7 @@ install() {
     if [ -n "$cfgExtlinux" ]; then
 	[ -n "$verbose" ] && echo "adding $version to $extlinuxConfig"
 
-	$grubby --extlinux -c $extlinuxConfig \
+	$grubby $enableDebug --extlinux -c $extlinuxConfig \
 	    --add-kernel=$kernelImage $DEVTREEDIR \
 	    $DEVTREE $INITRD --copy-default $makedefault --title "$title" \
 	    ${mbkernel:+--add-multiboot="$mbkernel"} ${mbargs:+--mbargs="$mbargs"} \
@@ -308,21 +314,21 @@ remove() {
 
     if [ -n "$cfgGrub" ]; then
 	[ -n "$verbose" ] && echo "removing $version from $grubConfig"
-	$grubby --grub -c $grubConfig \
+	$grubby $enableDebug --grub -c $grubConfig \
 	    --remove-kernel=$kernelImage
     else
 	[ -n "$verbose" ] && echo "$grubConfig does not exist, not running grubby for grub 0.97"
     fi
     if [ -n "$cfgGrub2" ]; then
 	[ -n "$verbose" ] && echo "removing $version from $grub2Config"
-	$grubby --grub2 -c $grub2Config \
+	$grubby $enableDebug --grub2 -c $grub2Config \
 		--remove-kernel=$kernelImage
     else
 	[ -n "$verbose" ] && echo "$grub2Config does not exist, not running grubby for grub 2"
     fi
     if [ -n "$cfgGrub2Efi" ]; then
 	[ -n "$verbose" ] && echo "removing $version from $grub2EfiConfig"
-	$grubby --grub2 -c $grub2EfiConfig --efi \
+	$grubby $enableDebug --grub2 -c $grub2EfiConfig --efi \
 		--remove-kernel=$kernelImage
     else
 	[ -n "$verbose" ] && echo "$grub2EfiConfig does not exist, not running grubby grub 2 with UEFI"
@@ -330,7 +336,7 @@ remove() {
 
     if [ -n "$cfgLilo" ]; then
 	[ -n "$verbose" ] && echo "removing $version from $liloConfig"
-	$grubby --remove-kernel=$kernelImage	    \
+	$grubby $enableDebug --remove-kernel=$kernelImage	    \
 		     --$liloFlag
 
 	if [ -n "$runLilo" ]; then
@@ -394,7 +400,7 @@ remove() {
 
     if [ -n "$cfgExtlinux" ]; then
 	[ -n "$verbose" ] && echo "removing $version from $extlinuxConfig"
-	$grubby --extlinux -c $extlinuxConfig \
+	$grubby $enableDebug --extlinux -c $extlinuxConfig \
 	    --remove-kernel=$kernelImage
     else
 	[ -n "$verbose" ] && echo "$extlinuxConfig does not exist, not running grubby for extlinux"
@@ -431,7 +437,7 @@ update() {
 
     if [ -n "$cfgGrub" ]; then
 	[ -n "$verbose" ] && echo "updating $version from $grubConfig"
-	$grubby --grub -c $grubConfig \
+	$grubby $enableDebug --grub -c $grubConfig \
 	    --update-kernel=$kernelImage \
 	    $INITRD \
 	    ${kernargs:+--args="$kernargs"} \
@@ -443,7 +449,7 @@ update() {
 
     if [ -n "$cfgGrub2" ]; then
 	[ -n "$verbose" ] && echo "updating $version from $grub2Config"
-	$grubby --grub2 -c $grub2Config \
+	$grubby $enableDebug --grub2 -c $grub2Config \
 	    --update-kernel=$kernelImage \
 	    $INITRD \
 	    ${kernargs:+--args="$kernargs"} \
@@ -454,7 +460,7 @@ update() {
 
     if [ -n "$cfgGrub2Efi" ]; then
 	[ -n "$verbose" ] && echo "updating $version from $grub2EfiConfig"
-	$grubby --grub2 -c $grub2EfiConfig --efi \
+	$grubby $enableDebug --grub2 -c $grub2EfiConfig --efi \
 	    --update-kernel=$kernelImage \
 	    $INITRD \
 	    ${kernargs:+--args="$kernargs"} \
@@ -465,7 +471,7 @@ update() {
 
     if [ -n "$cfgLilo" ]; then
 	[ -n "$verbose" ] && echo "updating $version from $liloConfig"
-	$grubby --update-kernel=$kernelImage \
+	$grubby $enableDebug --update-kernel=$kernelImage \
 	    $INITRD \
 	    ${kernargs:+--args="$kernargs"} \
 	    ${removeargs:+--remove-args="$removeargs"}	\
@@ -515,7 +521,7 @@ update() {
 
     if [ -n "$cfgExtlinux" ]; then
 	[ -n "$verbose" ] && echo "updating $version from $extlinuxConfig"
-	$grubby --extlinux -c $extlinuxConfig \
+	$grubby $enableDebug --extlinux -c $extlinuxConfig \
 	    --update-kernel=$kernelImage \
 	    $DEVTREE $DEVTREEDIR $INITRD \
 	    ${kernargs:+--args="$kernargs"} \
