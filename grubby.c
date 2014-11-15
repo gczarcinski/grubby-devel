@@ -50,6 +50,10 @@
 
 int debug = 0;	/* Currently just for template debugging */
 
+int makeDefault = 0; /* if set then update saved_entry in /boot/grub2/grubenv */
+int defaultIndex = -1; /* update saved_entry if this is specified (tests) */
+char * defaultKernel = NULL; /* update saved_entry if specified (tests) */
+
 #define _(A) (A)
 
 #define MAX_EXTRA_INITRDS	  16	/* code segment checked by --bootloader-probe */
@@ -354,6 +358,11 @@ static int grub2SetEnv(struct configFileInfo *info, char *name, char *value)
     char *s = NULL;
     int rc = 0;
     char *envFile = info->envFile ? info->envFile : "/boot/grub2/grubenv";
+
+    if (makeDefault==0 && defaultIndex==-1 && defaultKernel==NULL) {
+        dbgPrintf("grub2SetEnv(): makeDefault==0, skip updating saved_entry\n");
+        return rc;
+    }
 
     unquote(value);
     value = shellEscape(value);
@@ -4179,7 +4188,6 @@ int main(int argc, const char ** argv) {
     char * removeMBKernelArgs = NULL;
     char * removeMBKernel = NULL;
     char * bootPrefix = NULL;
-    char * defaultKernel = NULL;
     char * removeArgs = NULL;
     char * kernelInfo = NULL;
     char * extraInitrds[MAX_EXTRA_INITRDS] = { NULL };
@@ -4188,11 +4196,10 @@ int main(int argc, const char ** argv) {
     struct configFileInfo * cfi = NULL;
     struct grubConfig * config;
     struct singleEntry * template = NULL;
-    int copyDefault = 0, makeDefault = 0;
+    int copyDefault = 0;
     int displayDefault = 0;
     int displayDefaultIndex = 0;
     int displayDefaultTitle = 0;
-    int defaultIndex = -1;
     struct poptOption options[] = {
 	{ "add-kernel", 0, POPT_ARG_STRING, &newKernelPath, 0,
 	    _("add an entry for the specified kernel"), _("kernel-path") },
@@ -4442,6 +4449,7 @@ int main(int argc, const char ** argv) {
 	return 1;
     } else if (defaultKernel && newKernelPath &&
 		!strcmp(defaultKernel, newKernelPath)) {
+	dbgPrintf("----> forcing makeDefault=1 and defaultKernel=NULL\n");
 	makeDefault = 1;
 	defaultKernel = NULL;
     }
