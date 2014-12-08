@@ -103,6 +103,10 @@ Update the specified kernel.
 \fB-\-rpmposttrans\fR \fIkernel-version\fR
 Run the rpmposttrans for the specified kernel.
 
+.SH "run-time environment variable"
+If GRUBBY_ENABLE_DEBUG=yes is specified, then --enable-debug is passed
+to grubby as well as verbose mode being turn on for new-kernel-pkg.
+
 .SH "SEE ALSO"
 .BR grubby(8)
 .BR installkernel(8)

@@ -224,6 +224,13 @@ The command line syntax is more than a little baroque. This probably
 won't be fixed as \fBgrubby\fR is only intended to be called from shell
 scripts which can get it right.
 
+.SH "DEBUGGING"
+To improve degugging grubby, the DEBUG option has been changed from a
+compile-time option to a run-time option.  To enable debugging, the
+environment variable GRUBBY_ENABLE_DEBUG=yes must be defined.
+This causes the new-kernel-pkg script file to pass "--enable-debug"
+to grubby.
+
 .SH "SEE ALSO"
 .BR grub (8),
 .BR lilo (8),
