@@ -701,6 +701,8 @@ static int lineWrite(FILE * out, struct singleLine * line,
 static int getNextLine(char ** bufPtr, struct singleLine * line,
 		       struct configFileInfo * cfi);
 static char * getRootSpecifier(char * str);
+static char * getSubvolPrefix(struct singleLine * line, char * str);
+static char * findBootPrefix(void);
 static void requote(struct singleLine *line, struct configFileInfo * cfi);
 static void insertElement(struct singleLine * line,
 			  const char * item, int insertHere,
@@ -1404,7 +1406,14 @@ static struct grubConfig * readConfig(const char * inName,
 		entry->lines = line;
 	    else
 		last->next = line;
-	    dbgPrintf("readConfig added %s to %p\n", getKeyByType(line->type, cfi), entry);
+	    if ((line->numElements == 0) && (line->type == LT_WHITESPACE)) {
+		dbgPrintf("readConfig added %s to %p, comment='%s'\n",
+			getKeyByType(line->type, cfi), entry,
+			line->indent ? line->indent : "");
+	    } else {
+		dbgPrintf("readConfig added %s to %p\n",
+			getKeyByType(line->type, cfi), entry);
+	    }
 
 	    /* we could have seen this outside of an entry... if so, we
 	     * ignore it like any other line we don't grok */
@@ -1415,7 +1424,16 @@ static struct grubConfig * readConfig(const char * inName,
 		cfg->theLines = line;
 	    else
 		last->next = line;
-	    dbgPrintf("readConfig added %s to cfg\n", getKeyByType(line->type, cfi));
+	    if ((line->numElements == 0) && (line->type == LT_WHITESPACE)) {
+		dbgPrintf("readConfig added %s to cfg, comment='%s'\n",
+			getKeyByType(line->type, cfi),
+			line->indent ? line->indent : "");
+	    } else {
+		dbgPrintf("readConfig added %s to cfg ... 0:'%s' 1:'%s'\n",
+		    getKeyByType(line->type, cfi),
+		    (line->numElements > 0) ? line->elements[0].item : "",
+		    (line->numElements > 1) ? line->elements[1].item : "");
+	    }
 	}
 
 	last = line;
@@ -1510,6 +1528,7 @@ static void writeDefault(FILE * out, char * indent,
     struct singleLine * line;
     int i;
 
+    dbgPrintf("writeDefault() entered\n");
     if (!cfg->defaultImage && cfg->flags == GRUB_CONFIG_NO_DEFAULT) return;
 
     if (cfg->defaultImage == DEFAULT_SAVED)
@@ -1565,6 +1584,7 @@ static void writeDefault(FILE * out, char * indent,
             }
 	}
     }
+    dbgPrintf("writeDefault() done\n");
 }
 
 static int writeConfig(struct grubConfig * cfg, char * outName, 
@@ -1577,6 +1597,7 @@ static int writeConfig(struct grubConfig * cfg, char * outName,
     struct stat sb;
     int i;
 
+    dbgPrintf("writeConfig() to outName='%s'\n", outName);
     if (!strcmp(outName, "-")) {
 	out = stdout;
 	tmpOutName = NULL;
@@ -1628,6 +1649,7 @@ static int writeConfig(struct grubConfig * cfg, char * outName,
 
     line = cfg->theLines;
     struct keywordTypes *defaultKw = getKeywordByType(LT_DEFAULT, cfg->cfi);
+    dbgPrintf("writeConfig(): outputting the new config file\n");
     while (line) {
         if (line->type == LT_SET_VARIABLE && defaultKw &&
 		line->numElements == 3 &&
@@ -1657,6 +1679,7 @@ static int writeConfig(struct grubConfig * cfg, char * outName,
     }
 
     if (needs & MAIN_DEFAULT) {
+	dbgPrintf("writeconfig() doing main default\n");
 	writeDefault(out, cfg->primaryIndent, "=", cfg);
 	needs &= ~MAIN_DEFAULT;
     }
@@ -1678,7 +1701,9 @@ static int writeConfig(struct grubConfig * cfg, char * outName,
 	}
     }
 
+    dbgPrintf("writeConfig() done\n");
     if (tmpOutName) {
+	dbgPrintf("writeConfig() renaming '%s' to '%s'\n", tmpOutName, outName);
 	if (rename(tmpOutName, outName)) {
 	    fprintf(stderr, _("grubby: error moving %s to %s: %s\n"),
 		    tmpOutName, outName, strerror(errno));
@@ -1803,6 +1828,24 @@ void printEntry(struct singleEntry * entry, FILE *f) {
     }
 }
 
+void printEntries(struct grubConfig *cfg) {
+    struct singleEntry * entry;
+    int index = 0;
+
+    entry = cfg->entries;
+    while (entry) {
+        if (!entry->skip) {
+	    fprintf(stderr,"-------- entry=%i --------\n", index);
+	    printEntry(entry, stderr);
+	    fprintf(stderr,"-----end entry=%i --------\n", index);
+	    index++;
+	}
+	else
+	    fprintf(stderr,"-----skipping entry %i -----\n", index);
+        entry = entry->next;
+    }
+}
+
 void notSuitablePrintf(struct singleEntry * entry, int okay, const char *fmt, ...)
 {
     static int once;
@@ -1854,6 +1897,55 @@ static int endswith(const char *s, char c)
 	return s[slen] == c;
 }
 
+
+/* extract any btrfs prefix on filename */
+/* the passed string is elements[1] */
+static char * getSubvolPrefix(struct singleLine * line, char * str) {
+    char *idx,    *svPrefix = NULL;
+    int  slashcnt = 0;
+    const char * bootPrefix = findBootPrefix();
+    static int btrfsBootFlag = 0;
+
+    dbgPrintf("getSubvolPrefix() entered: str='%s'\n", str);
+    if (btrfsBootFlag == 0){
+	for (; line; line = line->next) {
+	    dbgPrintf("checkForBtrfsBoot(%s)\n",
+		line->numElements >0 ? line->elements[0].item : "");
+	    if (line->numElements >1) {
+		if ((strcasecmp(line->elements[0].item,"insmod")==0) &&
+		    (strcasecmp(line->elements[1].item,"btrfs")==0)) {
+		    dbgPrintf("NOTE: booting from a btrfs volume or subvolume\n");
+		    btrfsBootFlag = -1;
+		    break;
+		}
+	    }
+	}
+    }
+
+    idx = str;
+    while (*idx) {
+	if (*idx == '/')
+	    slashcnt++;
+	idx++;
+    }
+
+    if ((btrfsBootFlag == 0) ||
+	(slashcnt == 0) ||
+	(slashcnt == 1))
+	svPrefix = NULL;
+
+    else if ((btrfsBootFlag == -1) && (*str == '/')) {
+        idx = svPrefix = strdup(str);
+	idx++;
+        while(*idx && (*idx != '/') && (!isspace(*idx))) idx++;
+	*idx = '\0';  /* strip off the second slash */
+    }
+    dbgPrintf("getSubvolPrefix(): btrfsBootFlag=%i, slashcnt=%i, str='%s', bootPrefix='%s', svPrefix='%s'\n",
+	btrfsBootFlag, slashcnt, str, bootPrefix, svPrefix);
+
+    return svPrefix;
+}
+
 int suitableImage(struct singleEntry * entry, const char * bootPrefix,
 		  int skipRemoved, int flags) {
     struct singleLine * line;
@@ -1884,14 +1976,21 @@ int suitableImage(struct singleEntry * entry, const char * bootPrefix,
 	    return 1;
     }
 
+    dbgPrintf("suitableImage(), bootPrefix='%s', type='%s'\n",
+		bootPrefix, line->elements[0].item);
     fullName = alloca(strlen(bootPrefix) + 
 		      strlen(line->elements[1].item) + 1);
     rootspec = getRootSpecifier(line->elements[1].item);
+    if (rootspec == NULL) {
+	rootspec = getSubvolPrefix(entry->lines, line->elements[1].item);
+    }
     int rootspec_offset = rootspec ? strlen(rootspec) : 0;
     int hasslash = endswith(bootPrefix, '/') ||
     	beginswith(line->elements[1].item + rootspec_offset, '/');
     sprintf(fullName, "%s%s%s", bootPrefix, hasslash ? "" : "/",
             line->elements[1].item + rootspec_offset);
+    dbgPrintf("suitbleImage(): fullName='%s' root/subvol prefix='%s'\n",
+		fullName, (rootspec != NULL) ? rootspec : "");
     if (access(fullName, R_OK)) {
 	notSuitablePrintf(entry, 0, "access to %s failed\n", fullName);
 	return 0;
@@ -2065,11 +2164,17 @@ struct singleEntry * findEntryByPath(struct grubConfig * config,
 		if (line && line->type != LT_MENUENTRY &&
 			line->numElements >= 2) {
 		    rootspec = getRootSpecifier(line->elements[1].item);
+		    if (rootspec == NULL) {
+			rootspec = getSubvolPrefix(entry->lines, line->elements[1].item);
+		    }
 		    if (!strcmp(line->elements[1].item + 
 				((rootspec != NULL) ? strlen(rootspec) : 0),
 				kernel + strlen(prefix)))
 			break;
 		}
+		if(line->type == LT_MENUENTRY)
+		    dbgPrintf("findEntryByPath: got:'%s', wanted='%s'\n",
+				line->elements[1].item, kernel);
 		if(line->type == LT_MENUENTRY &&
 			!strcmp(line->elements[1].item, kernel))
 		    break;
@@ -2214,7 +2319,11 @@ struct singleEntry * findTemplate(struct grubConfig * cfg, const char * prefix,
     return NULL;
 }
 
-char * findBootPrefix(void) {
+/* FIXME: The findBootPrefix() does not work when grubby is run under mock
+   chroot.  This will occur when building an rpm under mock and some regression
+   tests will fail.  The current fix is a hack!
+*/
+static char * findBootPrefix(void) {
     struct stat sb, sb2;
 
     stat("/", &sb);
@@ -2845,16 +2954,22 @@ struct singleLine * addLineTmpl(struct singleEntry * entry,
 	/* but try to keep the rootspec from the template... sigh */
 	if (tmplLine->type & (LT_HYPER|LT_KERNEL|LT_MBMODULE|LT_INITRD|LT_KERNEL_EFI|LT_INITRD_EFI|LT_KERNEL_16|LT_INITRD_16)) {
 	    char * rootspec = getRootSpecifier(tmplLine->elements[1].item);
+	    if ((rootspec == NULL) && (tmplLine->type & (LT_HYPER|LT_KERNEL|LT_KERNEL_EFI|LT_KERNEL_16))) {
+		rootspec = getSubvolPrefix(entry->lines, tmplLine->elements[1].item);
+	    }
 	    if (rootspec != NULL) {
 		free(newLine->elements[1].item);
 		newLine->elements[1].item = 
 		    sdupprintf("%s%s", rootspec, val);
 	    }
 	}
+        dbgPrintf("addLineTmpl(%s), type= 0x%x '%s'\n",
+		   newLine->elements[0].item, tmplLine->type,
+                  newLine->elements[1].item);
+    } else {
+        dbgPrintf("addLineTmpl(%s), type= 0x%x\n", newLine->numElements ?
+	          newLine->elements[0].item : "", tmplLine->type);
     }
-
-    dbgPrintf("addLineTmpl(%s)\n", newLine->numElements ? 
-	      newLine->elements[0].item : "");
 
     if (!entry->lines) {
 	/* first one on the list */
@@ -2880,6 +2995,7 @@ struct singleLine *  addLine(struct singleEntry * entry,
     /* NB: This function shouldn't allocate items on the heap, rather on the
      * stack since it calls addLineTmpl which will make copies.
      */
+    dbgPrintf("addLine(): type=%i 0x%x\n", type, type);
     if (type == LT_TITLE && cfi->titleBracketed) {
 	/* we're doing a bracketed title (zipl) */
 	tmpl.type = type;
@@ -3374,23 +3490,42 @@ int addMBInitrd(struct grubConfig * cfg, const char *newMBKernel,
     struct singleEntry * entry;
     struct singleLine * line, * kernelLine, *endLine = NULL;
     int index = 0;
+    char * svPrefix = NULL;
+    char * newInitrd = NULL;
 
     if (!image) return 0;
+
+    dbgPrintf("addMBInitrd(), image='%s', prefix='%s', initrd='%s'\n",
+		image, prefix, initrd);
 
     for (; (entry = findEntryByPath(cfg, image, prefix, &index)); index++) {
         kernelLine = getLineByType(LT_MBMODULE, entry->lines);
         if (!kernelLine) continue;
+
+	dbgPrintf("... index=%i, kernel: %s '%s'\n", index,
+		kernelLine->elements[0].item,
+		kernelLine->elements[1].item);
+	svPrefix = getSubvolPrefix(entry->lines, kernelLine->elements[1].item);
 
         if (prefix) {
             int prefixLen = strlen(prefix);
             if (!strncmp(initrd, prefix, prefixLen))
                 initrd += prefixLen;
         }
+	if (svPrefix) {
+	    newInitrd = alloca(strlen(svPrefix) + strlen(initrd) + 2);
+	    strcpy(newInitrd, svPrefix);
+            strcat(newInitrd, initrd);
+	} else
+	    newInitrd = (char *)initrd;
+	dbgPrintf("... updated initrd='%s'\n", newInitrd);
 	endLine = getLineByType(LT_ENTRY_END, entry->lines);
 	if (endLine)
 	    removeLine(entry, endLine);
         line = addLine(entry, cfg->cfi, preferredLineType(LT_MBMODULE,cfg->cfi),
-			kernelLine->indent, initrd);
+			kernelLine->indent, newInitrd);
+	if (svPrefix)
+	    free(svPrefix);
         if (!line)
 	    return 1;
 	if (endLine) {
@@ -3410,12 +3545,20 @@ int updateInitrd(struct grubConfig * cfg, const char * image,
     struct singleEntry * entry;
     struct singleLine * line, * kernelLine, *endLine = NULL;
     int index = 0;
+    char * svPrefix = NULL;
+    char * newInitrd = NULL;
 
     if (!image) return 0;
+    dbgPrintf("updateInitrd(), image='%s', prefix='%s', initrd='%s'\n",
+		image, prefix, initrd);
 
     for (; (entry = findEntryByPath(cfg, image, prefix, &index)); index++) {
         kernelLine = getLineByType(LT_KERNEL|LT_KERNEL_EFI|LT_KERNEL_16, entry->lines);
         if (!kernelLine) continue;
+	dbgPrintf("... index=%i, kernel: %s '%s'\n", index,
+		kernelLine->elements[0].item,
+		kernelLine->elements[1].item);
+	svPrefix = getSubvolPrefix(entry->lines, kernelLine->elements[1].item);
 
         line = getLineByType(LT_INITRD|LT_INITRD_EFI|LT_INITRD_16, entry->lines);
         if (line)
@@ -3425,6 +3568,13 @@ int updateInitrd(struct grubConfig * cfg, const char * image,
             if (!strncmp(initrd, prefix, prefixLen))
                 initrd += prefixLen;
         }
+	if (svPrefix) {
+	    newInitrd = alloca(strlen(svPrefix) + strlen(initrd) + 2);
+	    strcpy(newInitrd, svPrefix);
+            strcat(newInitrd, initrd);
+	} else
+	    newInitrd = (char *)initrd;
+	dbgPrintf("... updated initrd='%s'\n", newInitrd);
 	endLine = getLineByType(LT_ENTRY_END, entry->lines);
 	if (endLine)
 	    removeLine(entry, endLine);
@@ -3442,7 +3592,9 @@ int updateInitrd(struct grubConfig * cfg, const char * image,
 	    default:
 	        lt = preferredLineType(LT_INITRD, cfg->cfi);
 	}
-        line = addLine(entry, cfg->cfi, lt, kernelLine->indent, initrd);
+        line = addLine(entry, cfg->cfi, lt, kernelLine->indent, newInitrd);
+	if (svPrefix)
+	    free(svPrefix);
         if (!line)
 	    return 1;
 	if (endLine) {
@@ -3763,11 +3915,15 @@ static char * getInitrdVal(struct grubConfig * config,
 
     prefixLen = strlen(prefix);
     totalSize = strlen(newKernelInitrd) - prefixLen + 1 /* \0 */;
+    dbgPrintf("getInitrdVal() prefixlen=%i totalsize=%i, newKernelInitrd='%s'\n",
+		(int)prefixLen, (int)totalSize,
+		newKernelInitrd);
 
     for (i = 0; i < extraInitrdCount; i++) {
 	totalSize += sizeof(separatorChar);
 	totalSize += strlen(extraInitrds[i]) - prefixLen;
     }
+    dbgPrintf("... totalSize with extra initrd %i\n", (int)totalSize);
 
     initrdVal = end = malloc(totalSize);
 
@@ -3807,6 +3963,7 @@ int addNewKernel(struct grubConfig * config, struct singleEntry * template,
     struct singleLine * newLine = NULL, * tmplLine = NULL, * masterLine = NULL;
     int needs;
     char * chptr;
+    char * svPrefix = NULL;
 
     if (!newKernelPath) return 0;
 
@@ -3846,12 +4003,17 @@ int addNewKernel(struct grubConfig * config, struct singleEntry * template,
     if (newDevTreePath && getKeywordByType(LT_DEVTREE, config->cfi))
 	needs |= NEED_DEVTREE;
 
+    dbgPrintf("addNewKernel(): needs=0x%x\n", needs);
     if (template) {
 	for (masterLine = template->lines; 
 	     masterLine && (tmplLine = lineDup(masterLine)); 
 	     lineFree(tmplLine), masterLine = masterLine->next) 
 	{
-	    dbgPrintf("addNewKernel processing %d\n", tmplLine->type);
+	    dbgPrintf("addNewKernel processing %d, 0x%x '%s', needs=0x%x, operand='%s'\n",
+			tmplLine->type, tmplLine->type,
+			tmplLine->numElements ? tmplLine->elements[0].item : "",
+			needs,
+			tmplLine->numElements>1 ? tmplLine->elements[1].item : "");
 
 	    /* skip comments */
 	    chptr = tmplLine->indent;
@@ -3860,6 +4022,7 @@ int addNewKernel(struct grubConfig * config, struct singleEntry * template,
 
 	    if (iskernel(tmplLine->type) && tmplLine->numElements >= 2) {
 		if (!template->multiboot && (needs & NEED_MB)) {
+		    dbgPrintf("addNewKernel: multiboot template\n");
 		    /* it's not a multiboot template and this is the kernel
 		     * line.  Try to be intelligent about inserting the
 		     * hypervisor at the same time.
@@ -3888,25 +4051,33 @@ int addNewKernel(struct grubConfig * config, struct singleEntry * template,
 			    free(tmplLine->elements[0].item);
 			    tmplLine->elements[0].item = strdup(mbm_kw->key);
 			}
+			dbgPrintf("addNewKernel processing #1, new kernel path='%s'\n",
+					newKernelPath);
 			newLine = addLineTmpl(new, tmplLine, newLine,
 					      newKernelPath + strlen(prefix), config->cfi);
 			needs &= ~NEED_KERNEL;
 		    }
 		    if (needs & NEED_MB) { /* !mbHyperFirst */
+			dbgPrintf("addNewKernel processing #2\n");
 			newLine = addLine(new, config->cfi, LT_HYPER, 
 					  config->secondaryIndent,
 					  newMBKernel + strlen(prefix));
 			needs &= ~NEED_MB;
 		    }
 		} else if (needs & NEED_KERNEL) {
+		    dbgPrintf("addNewKernel processing #3, new kernel path='%s'\n",
+				newKernelPath);
 		    newLine = addLineTmpl(new, tmplLine, newLine, 
 					  newKernelPath + strlen(prefix), config->cfi);
 		    needs &= ~NEED_KERNEL;
+		    /* save svPrefix in case we need to do initrd */
+		    svPrefix = getSubvolPrefix(new->lines, tmplLine->elements[1].item);
 		}
 
 	    } else if (tmplLine->type == LT_HYPER && 
 		       tmplLine->numElements >= 2) {
 		if (needs & NEED_MB) {
+		    dbgPrintf("addNewKernel processing #4 (LT_HYPER)\n");
 		    newLine = addLineTmpl(new, tmplLine, newLine, 
 					  newMBKernel + strlen(prefix), config->cfi);
 		    needs &= ~NEED_MB;
@@ -3916,6 +4087,7 @@ int addNewKernel(struct grubConfig * config, struct singleEntry * template,
 		       tmplLine->numElements >= 2) {
 		if (new->multiboot) {
 		    if (needs & NEED_KERNEL) {
+			dbgPrintf("addNewKernel processing #5\n");
 			newLine = addLineTmpl(new, tmplLine, newLine, 
 					      newKernelPath + 
 					      strlen(prefix), config->cfi);
@@ -3926,6 +4098,7 @@ int addNewKernel(struct grubConfig * config, struct singleEntry * template,
 			initrdVal = getInitrdVal(config, prefix, tmplLine,
 						 newKernelInitrd, extraInitrds,
 						 extraInitrdCount);
+			dbgPrintf("addNewKernel processing #6\n");
 			newLine = addLineTmpl(new, tmplLine, newLine,
 					      initrdVal, config->cfi);
 			free(initrdVal);
@@ -3940,6 +4113,7 @@ int addNewKernel(struct grubConfig * config, struct singleEntry * template,
 		    tmplLine->elements[0].item = 
 			strdup(getKeywordByType(tmplLine->type,
 						config->cfi)->key);
+		    dbgPrintf("addNewKernel processing #7\n");
 		    newLine = addLineTmpl(new, tmplLine, newLine, 
 					  newKernelPath + strlen(prefix),
 					  config->cfi);
@@ -3955,6 +4129,7 @@ int addNewKernel(struct grubConfig * config, struct singleEntry * template,
 			strdup(getKeywordByType(tmplLine->type,
 						config->cfi)->key);
 		    initrdVal = getInitrdVal(config, prefix, tmplLine, newKernelInitrd, extraInitrds, extraInitrdCount);
+		    dbgPrintf("addNewKernel processing #8\n");
 		    newLine = addLineTmpl(new, tmplLine, newLine, initrdVal, config->cfi);
 		    free(initrdVal);
 		    needs &= ~NEED_INITRD;
@@ -3972,6 +4147,8 @@ int addNewKernel(struct grubConfig * config, struct singleEntry * template,
 			char *initrdVal;
 	
 			initrdVal = getInitrdVal(config, prefix, tmplLine, newKernelInitrd, extraInitrds, extraInitrdCount);
+			dbgPrintf("addNewKernel processing #9, MBMODULE='%s'\n",
+					initrdVal);
 			newLine = addLine(new, config->cfi, LT_MBMODULE,
 					  config->secondaryIndent, 
 					  initrdVal);
@@ -3979,9 +4156,18 @@ int addNewKernel(struct grubConfig * config, struct singleEntry * template,
 			needs &= ~NEED_INITRD;
 		    }
 		} else if (needs & NEED_INITRD) {
-		    char *initrdVal;
+		    char *initrdVal, *newInitrdVal = NULL;
 		    initrdVal = getInitrdVal(config, prefix, tmplLine, newKernelInitrd, extraInitrds, extraInitrdCount);
-		    newLine = addLineTmpl(new, tmplLine, newLine, initrdVal, config->cfi);
+		    dbgPrintf("addNewKernel processing #10, initrdVal='%s', svPrefix='%s'\n",
+				initrdVal, svPrefix ? svPrefix : "");
+		    if (svPrefix) {
+		        newInitrdVal = alloca(strlen(svPrefix) + strlen(initrdVal));
+		        strcpy(newInitrdVal, svPrefix);
+		        strcat(newInitrdVal, initrdVal);
+		    }
+		    else
+		        newInitrdVal = initrdVal;
+		    newLine = addLineTmpl(new, tmplLine, newLine, newInitrdVal, config->cfi);
 		    free(initrdVal);
 		    needs &= ~NEED_INITRD;
 		}
@@ -3993,18 +4179,21 @@ int addNewKernel(struct grubConfig * config, struct singleEntry * template,
 		strcpy(nkt, "'");
 		strcat(nkt, newKernelTitle);
 		strcat(nkt, "'");
+		dbgPrintf("addNewKernel processing #11, new='%s'\n", nkt);
 		newLine = addLineTmpl(new, tmplLine, newLine, nkt, config->cfi);
 		free(nkt);
 		needs &= ~NEED_TITLE;
 	    } else if (tmplLine->type == LT_TITLE && 
 		       (needs & NEED_TITLE)) {
 		if (tmplLine->numElements >= 2) {
+		    dbgPrintf("addNewKernel processing #12\n");
 		    newLine = addLineTmpl(new, tmplLine, newLine, 
 					  newKernelTitle, config->cfi);
 		    needs &= ~NEED_TITLE;
 		} else if (tmplLine->numElements == 1 &&
 			   config->cfi->titleBracketed) {
 		    /* addLineTmpl doesn't handle titleBracketed */
+		    dbgPrintf("addNewKernel processing #13\n");
 		    newLine = addLine(new, config->cfi, LT_TITLE,
 				      tmplLine->indent, newKernelTitle);
 		    needs &= ~NEED_TITLE;
@@ -4022,6 +4211,7 @@ int addNewKernel(struct grubConfig * config, struct singleEntry * template,
 			strcpy(newTitle, prefix);
 			strcat(newTitle, newKernelTitle);
 			strcat(newTitle, "'");
+			dbgPrintf("addNewKernel processing #14\n");
 			newLine = addLine(new, config->cfi, LT_ECHO,
 					tmplLine->indent, newTitle);
 			free(newTitle);
@@ -4055,6 +4245,7 @@ int addNewKernel(struct grubConfig * config, struct singleEntry * template,
 	/* don't have a template, so start the entry with the 
 	 * appropriate starting line 
 	 */
+	dbgPrintf("addNewKernel processing no template, create something anyway\n");
 	switch (config->cfi->entryStart) {
 	    case LT_KERNEL:
 	    case LT_KERNEL_EFI:
@@ -4126,6 +4317,7 @@ int addNewKernel(struct grubConfig * config, struct singleEntry * template,
 	    removeLine(new, endLine);
 	    needs |= NEED_END;
     }
+    dbgPrintf("addNewKernel(): done loop, needs=0x%x\n", needs);
 
     /* add the remainder of the lines, i.e. those that either
      * weren't present in the template, or in the case of no template,
@@ -4144,6 +4336,7 @@ int addNewKernel(struct grubConfig * config, struct singleEntry * template,
 	needs &= ~NEED_MB;
     }
     if (needs & NEED_KERNEL) {
+	dbgPrintf("addNewKernel processing #15\n");
 	newLine = addLine(new, config->cfi, 
 			  (new->multiboot && getKeywordByType(LT_MBMODULE, 
 							      config->cfi))
@@ -4193,6 +4386,12 @@ int addNewKernel(struct grubConfig * config, struct singleEntry * template,
 
     if (updateImage(config, "0", prefix, newKernelArgs, NULL, 
                     newMBKernelArgs, NULL)) return 1;
+
+    if (enableDebug) {
+        fprintf(stderr,"--end of addNewKernel()-----\n");
+        printEntry(new, stderr);
+        fprintf(stderr,"--end of addNewKernel()-----\n");
+    }
 
     return 0;
 }
@@ -4401,6 +4600,9 @@ int main(int argc, const char ** argv) {
 	fprintf(stderr, _("grubby: unexpected argument %s\n"), chptr);
 	return 1;
     }
+
+    dbgPrintf("---> Begin grubby execution <------------------------------------\n");
+    dbgPrintf("---> command line:%s\n",saved_command_line);
 
     if ((configureLilo + configureGrub2 + configureGrub + configureELilo + 
 		configureYaboot + configureSilo + configureZipl +
@@ -4719,6 +4921,9 @@ int main(int argc, const char ** argv) {
                           "Not writing out new config.\n"));
         return 1;
     }
+
+    if (enableDebug)
+        printEntries(config);
 
     if (!outputFile)
 	outputFile = (char *)grubConfig;
