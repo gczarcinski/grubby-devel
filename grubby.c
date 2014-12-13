@@ -42,13 +42,13 @@
 #define DEBUG 0
 #endif
 
-#if DEBUG
-#define dbgPrintf(format, args...) fprintf(stderr, format , ## args)
-#else
-#define dbgPrintf(format, args...)
-#endif
+#define dbgPrintf(format, args...) \
+    if (enableDebug) {\
+	fprintf(stderr, format , ## args); \
+    }
 
 int debug = 0;	/* Currently just for template debugging */
+int enableDebug = 0; /* controls what is printed by dbgPrintf */
 
 int makeDefault = 0; /* if set then update saved_entry in /boot/grub2/grubenv */
 int defaultIndex = -1; /* update saved_entry if this is specified (tests) */
@@ -828,9 +828,9 @@ static enum lineType_e getTypeByKeyword(char * keyword,
 
 static struct singleLine * getLineByType(enum lineType_e type,
 					 struct singleLine * line) {
-    dbgPrintf("getLineByType(%d): ", type);
+    dbgPrintf("getLineByType(%x): ", type);
     for (; line; line = line->next) {
-	dbgPrintf("%d:%s ", line->type, 
+	dbgPrintf("%x:%s ", line->type, 
 		  line->numElements ? line->elements[0].item : "(empty)");
 	if (line->type & type) break;
     }
@@ -2049,7 +2049,7 @@ struct singleEntry * findEntryByPath(struct grubConfig * config,
 	for (entry = findEntryByIndex(config, i); entry; entry = entry->next, i++) {
 	    if (entry->skip) continue;
 
-	    dbgPrintf("findEntryByPath looking for %d %s in %p\n", checkType, kernel, entry);
+	    dbgPrintf("findEntryByPath looking for %x %s in %p\n", checkType, kernel, entry);
 
 	    /* check all the lines matching checkType */
 	    for (line = entry->lines; line; line = line->next) {
@@ -2668,15 +2668,17 @@ int grubGetBootFromDeviceMap(const char * device,
 int suseGrubConfGetBoot(const char * path, char ** bootPtr) {
     char * grubDevice;
 
-    if (suseGrubConfGetInstallDevice(path, &grubDevice))
+    if (suseGrubConfGetInstallDevice(path, &grubDevice)) {
 	dbgPrintf("error looking for grub installation device\n");
-    else
+    } else {
 	dbgPrintf("grubby installation device: %s\n", grubDevice);
+    }
 
-    if (grubGetBootFromDeviceMap(grubDevice, bootPtr))
+    if (grubGetBootFromDeviceMap(grubDevice, bootPtr)) {
 	dbgPrintf("error looking for grub boot device\n");
-    else
+    } else {
 	dbgPrintf("grubby boot device: %s\n", *bootPtr);
+    }
 
     free(grubDevice);
     return 0;
@@ -4293,6 +4295,8 @@ int main(int argc, const char ** argv) {
 	    _("configure elilo bootloader") },
 	{ "efi", 0, POPT_ARG_NONE, &isEfi, 0,
 	    _("force grub2 stanzas to use efi") },
+	{ "enable-debug", 0, 0, &enableDebug, 0,
+	    _("print debugging information") },
 	{ "env", 0, POPT_ARG_STRING, &envPath, 0,
 	    _("path for environment data"),
 	    _("path") },
